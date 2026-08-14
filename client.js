@@ -52,6 +52,14 @@ return {
       }
       .a2a-status-count { font-size: 22px; font-weight: 700; line-height: 1.1; }
       .a2a-status-error { color: #ef4444; }
+      .a2a-status-badge {
+        display: inline-block;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(34, 197, 94, 0.15);
+        color: #16a34a;
+      }
     `),
     )
 
@@ -88,6 +96,9 @@ return {
           { className: 'a2a-status-header' },
           React.createElement('span', { className: 'a2a-status-dot' }),
           'A2A Agent · 运行中',
+          status && status.streaming
+            ? React.createElement('span', { className: 'a2a-status-badge' }, 'SSE 流式')
+            : null,
         ),
         React.createElement(
           'div',

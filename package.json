@@ -1,6 +1,6 @@
 {
   "name": "dsh-a2a-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Expose a DeepSeek Harness agent over the Agent2Agent (A2A) protocol: agent card, JSON-RPC endpoint, LLM-powered replies, and a live status card.",
   "type": "module",
   "main": "lib/index.js",

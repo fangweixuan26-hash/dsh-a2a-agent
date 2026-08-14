@@ -3,8 +3,9 @@
 // This file is the `code.host` body for a DeepSeek Harness dynamic Cordis
 // Plugin. Paste its contents into the `code.host` field of `cordis_define`.
 //
-// It exposes the A2A endpoints on the host `webServer` and registers the
-// package-private `get-status` RPC consumed by client.js.
+// It exposes the A2A endpoints on the host `webServer`, registers the
+// package-private `get-status` RPC consumed by client.js, and (when
+// `enableStreaming` is true) streams `message/stream` replies over SSE.
 
 return {
   apply(ctx) {
@@ -13,6 +14,9 @@ return {
       console.error('[a2a] webServer service unavailable; plugin inactive')
       return
     }
+
+    // 可选择启用：改为 false 即禁用 SSE 流式（message/stream）
+    const enableStreaming = true
 
     let counter = 0
     function makeId(prefix) {
@@ -83,6 +87,22 @@ return {
       res.end()
     }
 
+    function startSse(res) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      })
+      res.write(': connected\n\n')
+    }
+
+    function sendSse(res, event, data) {
+      if (event) res.write('event: ' + event + '\n')
+      res.write('data: ' + JSON.stringify(data) + '\n\n')
+    }
+
     const host = webServer.host === '0.0.0.0' ? '127.0.0.1' : webServer.host
     const baseUrl = 'http://' + host + ':' + webServer.port
 
@@ -92,9 +112,9 @@ return {
       description:
         'A DeepSeek Harness coding agent exposed over the Agent2Agent (A2A) protocol.',
       url: baseUrl + '/a2a',
-      version: '0.1.0',
+      version: '0.3.0',
       capabilities: {
-        streaming: false,
+        streaming: enableStreaming,
         pushNotifications: false,
         stateTransitionHistory: false,
       },
@@ -129,15 +149,26 @@ return {
       return '[A2A echo] ' + (text && text.trim() ? text : '(empty message)')
     }
 
-    async function generateReply(text) {
+    function buildLlmContext() {
       const llm = ctx.get('llm')
       const modelSel = ctx.get('agentDefaultModel')
-      if (llm === undefined || modelSel === undefined) return echo(text)
+      if (llm === undefined || modelSel === undefined) return null
+      let sel
       try {
-        const sel = modelSel.currentSelection()
-        const provider = sel && sel.provider
-        const model = sel && sel.model
-        if (!provider || !model) return echo(text)
+        sel = modelSel.currentSelection()
+      } catch (e) {
+        return null
+      }
+      const provider = sel && sel.provider
+      const model = sel && sel.model
+      if (!provider || !model) return null
+      return { llm, provider, model }
+    }
+
+    async function generateReply(text) {
+      const c = buildLlmContext()
+      if (c === null) return echo(text)
+      try {
         const messages = [
           {
             id: makeId('m'),
@@ -147,9 +178,9 @@ return {
           },
         ]
         let out = ''
-        for await (const chunk of llm.stream({
-          provider: provider,
-          model: model,
+        for await (const chunk of c.llm.stream({
+          provider: c.provider,
+          model: c.model,
           messages: messages,
           system:
             'You are an agent answering messages received over the A2A protocol. Reply concisely and helpfully.',
@@ -231,6 +262,127 @@ return {
       return rpcResult(id, task)
     }
 
+    // SSE message/stream：把 llm.stream() 的 token 增量实时推送出去。
+    async function handleStream(payload, req, res) {
+      const id = payload && payload.id
+      const params = (payload && payload.params) || {}
+      const message = params.message
+      if (!message || typeof message !== 'object') {
+        sendJson(res, 200, rpcError(id, -32602, 'Invalid params: message is required'))
+        return
+      }
+
+      startSse(res)
+      let cancelled = false
+      req.on('close', () => {
+        cancelled = true
+      })
+
+      const text = extractText(message)
+      const contextId =
+        (typeof message.contextId === 'string' && message.contextId) ||
+        makeId('ctx')
+      const taskId = makeId('task')
+      const task = {
+        id: taskId,
+        contextId: contextId,
+        status: 'working',
+        history: [message],
+        artifacts: [],
+      }
+      tasks.set(taskId, task)
+
+      sendSse(res, 'status-update', {
+        kind: 'status-update',
+        taskId: taskId,
+        contextId: contextId,
+        status: { state: 'working' },
+        final: false,
+      })
+
+      const artifactId = makeId('art')
+      let fullText = ''
+      const c = buildLlmContext()
+      if (c !== null) {
+        try {
+          const messages = [
+            {
+              id: makeId('m'),
+              role: 'user',
+              content: [{ type: 'text', text: text }],
+              source: { kind: 'user' },
+            },
+          ]
+          for await (const chunk of c.llm.stream({
+            provider: c.provider,
+            model: c.model,
+            messages: messages,
+            system:
+              'You are an agent answering messages received over the A2A protocol. Reply concisely and helpfully.',
+          })) {
+            if (cancelled) break
+            if (chunk.type === 'text-delta') {
+              fullText += chunk.text
+              sendSse(res, 'artifact-update', {
+                kind: 'artifact-update',
+                taskId: taskId,
+                contextId: contextId,
+                artifact: {
+                  artifactId: artifactId,
+                  name: 'reply',
+                  parts: [{ kind: 'text', text: chunk.text }],
+                },
+                append: true,
+              })
+            } else if (
+              chunk.type === 'finish' &&
+              chunk.reason &&
+              chunk.reason.kind === 'error'
+            ) {
+              break
+            }
+          }
+        } catch (err) {
+          console.error('[a2a] stream failed, finishing with echo:', err && err.message)
+        }
+      }
+
+      if (cancelled) {
+        task.status = 'canceled'
+        res.end()
+        return
+      }
+
+      if (!fullText.trim()) fullText = echo(text)
+
+      const replyMessage = {
+        kind: 'message',
+        messageId: makeId('msg'),
+        role: 'agent',
+        parts: [{ kind: 'text', text: fullText }],
+        contextId: contextId,
+        taskId: taskId,
+      }
+      task.status = 'completed'
+      task.history.push(replyMessage)
+      task.artifacts.push({
+        artifactId: artifactId,
+        name: 'reply',
+        parts: [{ kind: 'text', text: fullText }],
+      })
+      messageCount += 1
+
+      sendSse(res, 'message', replyMessage)
+      sendSse(res, 'status-update', {
+        kind: 'status-update',
+        taskId: taskId,
+        contextId: contextId,
+        status: { state: 'completed' },
+        final: true,
+      })
+      res.end()
+    }
+
     function handleGet(params, id) {
       const taskId = params && params.id
       if (typeof taskId !== 'string') {
@@ -272,6 +424,14 @@ return {
       switch (method) {
         case 'message/send':
           return await handleSend(params, id)
+        case 'message/stream':
+          return rpcError(
+            id,
+            enableStreaming ? -32603 : -32601,
+            enableStreaming
+              ? 'message/stream requires SSE transport; not available in batch'
+              : 'Method not found: message/stream (streaming disabled)',
+          )
         case 'tasks/get':
           return handleGet(params, id)
         case 'tasks/cancel':
@@ -326,15 +486,20 @@ return {
         sendJson(res, 200, results)
         return
       }
+      // SSE 流式走独立通道
+      if (enableStreaming && payload && payload.method === 'message/stream') {
+        await handleStream(payload, req, res)
+        return
+      }
       sendJson(res, 200, await dispatch(payload))
     }
 
-    // Package-private status RPC consumed by the Client Run card (client.js).
     harness.handle('get-status', async () => ({
       endpointUrl: baseUrl + '/a2a',
       agentCardUrl: baseUrl + '/.well-known/agent.json',
       messageCount: messageCount,
       taskCount: tasks.size,
+      streaming: enableStreaming,
     }))
 
     ctx.effect(() => {
@@ -355,6 +520,10 @@ return {
       })
       console.log('[a2a] agent card:      ' + baseUrl + '/.well-known/agent.json')
       console.log('[a2a] JSON-RPC endpoint: ' + baseUrl + '/a2a')
+      console.log(
+        '[a2a] streaming: ' +
+          (enableStreaming ? 'enabled (message/stream via SSE)' : 'disabled'),
+      )
       return () => {
         d3()
         d2()

@@ -10,7 +10,7 @@
   <a href="https://github.com/fangweixuan26-hash/dsh-a2a-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license"></a>
   <a href="https://a2a-protocol.org/"><img src="https://img.shields.io/badge/A2A-1.0-orange.svg" alt="A2A 1.0"></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D20-green.svg" alt="node"></a>
-  <img src="https://img.shields.io/badge/version-0.2.0-brightgreen.svg" alt="version">
+  <img src="https://img.shields.io/badge/version-0.3.0-brightgreen.svg" alt="version">
   <a href="https://github.com/fangweixuan26-hash/dsh-a2a-agent/stargazers"><img src="https://img.shields.io/github/stars/fangweixuan26-hash/dsh-a2a-agent?style=social" alt="stars"></a>
 </p>
 
@@ -31,7 +31,7 @@
 <table>
   <tr>
     <td>🪪 <b>Agent Card 自动发现</b><br/>符合 A2A 1.0 规范的 <code>/.well-known/agent.json</code></td>
-    <td>🔌 <b>JSON-RPC 2.0</b><br/>标准 <code>message/send</code> · <code>tasks/get</code> · <code>tasks/cancel</code></td>
+    <td>🔌 <b>JSON-RPC 2.0</b><br/><code>message/send</code> · <code>message/stream</code> · <code>tasks/get</code> · <code>tasks/cancel</code></td>
   </tr>
   <tr>
     <td>🧠 <b>真实大模型回复</b><br/>复用宿主 <code>llm</code> 服务流式生成</td>
@@ -150,6 +150,7 @@ cordis_run(...)
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `message/send` | `{ message }` | `Task` | 发送消息，同步生成回复并完成 |
+| `message/stream` | `{ message }` | SSE 事件流 | 流式返回 token（需启用 streaming） |
 | `tasks/get` | `{ id }` | `Task` | 按 id 查询任务 |
 | `tasks/cancel` | `{ id }` | `Task` | 取消进行中的任务 |
 
@@ -210,6 +211,32 @@ curl -s http://127.0.0.1:3080/a2a \
   -d '{"jsonrpc":"2.0","id":2,"method":"tasks/get","params":{"id":"task-..."}}'
 ```
 
+### 流式消息（SSE）
+
+```bash
+curl -N http://127.0.0.1:3080/a2a \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"message/stream","params":{"message":{"messageId":"m3","role":"user","parts":[{"kind":"text","text":"用一句话介绍你自己"}]}}}'
+```
+
+返回 SSE 事件流，逐 token 推送：
+
+```
+: connected
+event: status-update
+data: {"kind":"status-update","status":{"state":"working"},...}
+
+event: artifact-update
+data: {"kind":"artifact-update","artifact":{"parts":[{"kind":"text","text":"我"}]},"append":true}
+...
+
+event: message
+data: {"kind":"message","role":"agent","parts":[{"kind":"text","text":"我是一个智能助手…"}]}
+
+event: status-update
+data: {"kind":"status-update","status":{"state":"completed"},"final":true}
+```
+
 ## 🧠 回复是如何生成的
 
 1. 从 `message.parts` 提取所有 `text` 片段
@@ -219,10 +246,27 @@ curl -s http://127.0.0.1:3080/a2a \
 
 任务、消息、工件均存储于**进程内存**，插件停止时自动清空。
 
+## ⚙️ 配置
+
+### `enableStreaming`（可选择启用 SSE 流式）
+
+| 形态 | 配置方式 |
+|------|---------|
+| npm 包 | `cordis.yml` 里 `config: { enableStreaming: true }` |
+| 动态插件 | 编辑 `host.js` 顶部的 `const enableStreaming = true` |
+
+开启后：
+
+- Agent Card 声明 `capabilities.streaming: true`
+- `/a2a` 端点支持 `message/stream`（SSE，逐 token 推送）
+- 状态卡片显示「SSE 流式」徽标
+
+关闭时，`message/stream` 返回 `-32601 Method not found`。
+
 ## 🛣️ 路线图
 
 - [x] npm 包形态 —— 作为 host 组合条目挂载（含 `/a2a/status` 端点）
-- [ ] `message/stream` —— SSE 流式返回 token
+- [x] `message/stream` —— SSE 流式返回 token（可选择启用）
 - [ ] 子代理调度 —— 长任务转交 `subagents`
 - [ ] 任务持久化 —— 跨插件重启保留
 - [ ] 认证 —— Agent Card `securitySchemes` / Bearer token
