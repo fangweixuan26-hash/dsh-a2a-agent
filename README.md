@@ -75,51 +75,64 @@ sequenceDiagram
 
 ```
 dsh-a2a-agent/
-├── host.js      # Host half → cordis_define 的 code.host
-├── client.js    # Client half → cordis_define 的 code.client
+├── lib/index.js   # npm 包形态（Host 插件，可挂载到 host 组合）
+├── host.js        # 动态插件 Host half → cordis_define 的 code.host
+├── client.js      # 动态插件 Client half → cordis_define 的 code.client
 ├── README.md
 ├── LICENSE
 ├── package.json
 └── cordis.example.yml   # 用法说明
 ```
 
+## 🧩 两种形态
+
+本项目同时提供两种形态，按需选用：
+
+| 形态 | 文件 | 状态卡片 | 适用场景 |
+|------|------|---------|---------|
+| **npm 包** | `lib/index.js` | 通过 `/a2a/status` HTTP 端点轮询 | 挂载到宿主组合，`pnpm add dsh-a2a-agent` |
+| **动态插件** | `host.js` + `client.js` | 内置 Run 卡片（每 2s 轮询） | `cordis_define` 即时加载，零构建 |
+
+> 💡 为什么 npm 包形态不带内置 Client 卡片：DSH 正式插件的 Client→Host 通信走 **Typert Remote**（TS 装饰器 + 构建时生成 codec），需要完整构建链。为保持零构建、可直接挂载，npm 包形态用 `/a2a/status` HTTP 端点替代，任意前端都能轮询渲染。
+
 ## 📦 快速开始
 
-### 前置条件
+### 方式 A：npm 包形态（挂载宿主组合）
 
-- 一个运行中的 **DeepSeek Harness**
-- 在 Harness 里使用 `cordis_define` / `cordis_run` 工具
-
-### 1. 加载源码
-
-把两个文件的内容作为动态插件的两个 half：
-
-```
-code.host   = host.js 的内容
-code.client = client.js 的内容
+```bash
+cd ~/.dsh/profiles/web
+pnpm add dsh-a2a-agent
 ```
 
-### 2. 定义并运行
+在宿主组合（`cordis.yml` / `cordis.patch.yml`）加入：
+
+```yaml
+- id: a2a-agent
+  name: dsh-a2a-agent
+```
+
+重启后验证：
+
+```bash
+curl http://127.0.0.1:3080/.well-known/agent.json   # Agent Card
+curl http://127.0.0.1:3080/a2a/status               # 状态 JSON
+```
+
+### 方式 B：动态插件形态（含状态卡片）
+
+把 `host.js` / `client.js` 的内容作为动态插件的两个 half：
 
 ```js
 cordis_define(
   { plugin: { kind: "new", idPrefix: "bridge" } },
   name: "A2A Protocol Server",
   purpose: "Expose this agent over A2A",
-  code: { host, client },
+  code: { host, client },  // host = host.js 内容, client = client.js 内容
 )
 cordis_run(...)
 ```
 
 > 💡 首次运行含 Client 代码的 Package 需要你在 UI 里**批准**；批准后 Run 卡片内会出现状态卡片。
-
-### 3. 验证
-
-```bash
-curl http://127.0.0.1:3080/.well-known/agent.json
-```
-
-看到 Agent Card JSON 即说明挂载成功。
 
 ## 🔌 API 参考
 
@@ -130,6 +143,7 @@ curl http://127.0.0.1:3080/.well-known/agent.json
 | `GET` | `/.well-known/agent.json` | A2A 1.0 Agent Card |
 | `GET` | `/.well-known/agent-card.json` | 旧版（0.2.x）别名，兼容 |
 | `POST` | `/a2a` | JSON-RPC 2.0 入口 |
+| `GET` | `/a2a/status` | 状态 JSON（端点 URL、消息数、任务数） |
 
 ### JSON-RPC 方法
 
@@ -207,11 +221,12 @@ curl -s http://127.0.0.1:3080/a2a \
 
 ## 🛣️ 路线图
 
+- [x] npm 包形态 —— 作为 host 组合条目挂载（含 `/a2a/status` 端点）
 - [ ] `message/stream` —— SSE 流式返回 token
 - [ ] 子代理调度 —— 长任务转交 `subagents`
 - [ ] 任务持久化 —— 跨插件重启保留
 - [ ] 认证 —— Agent Card `securitySchemes` / Bearer token
-- [ ] npm 包形态 —— 作为 host/client 组合条目挂载（含 Typert Remote）
+- [ ] npm 包 Client 卡片 —— 走 Typert Remote（需 DSH 构建链）
 
 ## 🤝 贡献
 
