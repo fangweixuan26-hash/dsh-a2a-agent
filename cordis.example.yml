@@ -1,20 +1,32 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# dsh-a2a-agent — example host-composition fragment.
+# dsh-a2a-agent — usage reference
 #
-# Add the following row to your DeepSeek Harness HOST composition (the
-# `cordis.yml` that holds cross-session services such as `webServer`), then
-# restart the harness. The plugin reuses the host `webServer`, so it must be
-# mounted where that service resolves.
+# This project is a DeepSeek Harness dynamic Cordis Plugin: two halves that
+# map directly onto the `code.host` and `code.client` fields of the
+# `cordis_define` tool.
 #
-#   GET /.well-known/agent.json  -> A2A 1.0 agent card
-#   POST /a2a                    -> JSON-RPC 2.0 endpoint
+#   host.js    ->  code.host     (A2A endpoints + get-status RPC)
+#   client.js  ->  code.client   (status card in the cordis Run card)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# 1. Install the package inside the harness profile's module tree, e.g.:
+# 1. Load the source:
 #
-#    cd ~/.dsh/profiles/web
-#    pnpm add dsh-a2a-agent
+#    host   = <contents of host.js>
+#    client = <contents of client.js>
 #
-# 2. Append a row to your host composition:
-- id: a2a-agent
-  name: dsh-a2a-agent
+# 2. Define and run:
+#
+#    cordis_define(plugin: {kind:"new", idPrefix:"bridge"},
+#                  name: "A2A Protocol Server",
+#                  purpose: "Expose this agent over A2A",
+#                  code: { host, client })
+#    cordis_run(...)
+#
+# 3. After the Run completes, the card shows:
+#      - JSON-RPC endpoint URL   (e.g. http://127.0.0.1:3080/a2a)
+#      - Agent Card URL          (http://127.0.0.1:3080/.well-known/agent.json)
+#      - received-message count and live task count
+#
+#    curl http://127.0.0.1:3080/.well-known/agent.json
+#    curl http://127.0.0.1:3080/a2a -H 'Content-Type: application/json' \
+#      -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":"user","parts":[{"kind":"text","text":"hi"}]}}}'
