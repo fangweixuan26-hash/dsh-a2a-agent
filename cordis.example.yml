@@ -1,0 +1,20 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# dsh-a2a-agent — example host-composition fragment.
+#
+# Add the following row to your DeepSeek Harness HOST composition (the
+# `cordis.yml` that holds cross-session services such as `webServer`), then
+# restart the harness. The plugin reuses the host `webServer`, so it must be
+# mounted where that service resolves.
+#
+#   GET /.well-known/agent.json  -> A2A 1.0 agent card
+#   POST /a2a                    -> JSON-RPC 2.0 endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 1. Install the package inside the harness profile's module tree, e.g.:
+#
+#    cd ~/.dsh/profiles/web
+#    pnpm add dsh-a2a-agent
+#
+# 2. Append a row to your host composition:
+- id: a2a-agent
+  name: dsh-a2a-agent
