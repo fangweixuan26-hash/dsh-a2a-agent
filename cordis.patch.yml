@@ -1,0 +1,14 @@
+# dsh-a2a-agent — bundle patch layer
+#
+# Referenced by the `dsh.bundle` manifest in package.json. When a profile lists
+# this package as a bundle (e.g. `dsh plugin add dsh-a2a-agent`), this layer
+# inserts the A2A agent plugin row into the host composition.
+#
+# `enableStreaming` opts into the SSE `message/stream` endpoint; set it to false
+# to disable streaming.
+
+- insert:
+    - id: a2a-agent
+      name: dsh-a2a-agent
+      config:
+        enableStreaming: true

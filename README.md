@@ -95,28 +95,24 @@ dsh-a2a-agent/
 
 > 💡 为什么 npm 包形态不带内置 Client 卡片：DSH 正式插件的 Client→Host 通信走 **Typert Remote**（TS 装饰器 + 构建时生成 codec），需要完整构建链。为保持零构建、可直接挂载，npm 包形态用 `/a2a/status` HTTP 端点替代，任意前端都能轮询渲染。
 
+> 🔖 **插件市场收录**：本仓库带 GitHub topic **`dsh-plugin`**，会被社区插件市场（扫描 [`github.com/topics/dsh-plugin`](https://github.com/topics/dsh-plugin)）自动收录；`package.json` 的 `dsh.bundle` manifest 让市场能识别并一键安装。
+
 ## 📦 快速开始
 
-### 方式 A：npm 包形态（挂载宿主组合）
+### 方式 A：组合包安装（`dsh plugin`，推荐）
 
 ```bash
-cd ~/.dsh/profiles/web
-pnpm add dsh-a2a-agent
+dsh plugin add dsh-a2a-agent          # 或 github:fangweixuan26-hash/dsh-a2a-agent
 ```
 
-在宿主组合（`cordis.yml` / `cordis.patch.yml`）加入：
-
-```yaml
-- id: a2a-agent
-  name: dsh-a2a-agent
-```
-
-重启后验证：
+`dsh.bundle` manifest 会自动把插件层插入宿主组合（默认 `enableStreaming: true`）。重启后验证：
 
 ```bash
 curl http://127.0.0.1:3080/.well-known/agent.json   # Agent Card
 curl http://127.0.0.1:3080/a2a/status               # 状态 JSON
 ```
+
+> 手动挂载：也可 `pnpm add dsh-a2a-agent` 后在宿主组合加一行 `- id: a2a-agent` + `name: dsh-a2a-agent`（`config.enableStreaming` 可选）。
 
 ### 方式 B：动态插件形态（含状态卡片）
 
